@@ -1,0 +1,2 @@
+theta,steps,goal_reached,intercepted,entropy_at_midfield,mean_entropy,final_dist_to_goal,num_episodes,goal_success_rate,interception_rate
+0.53125,14.53125,0.53125,0.46875,0.8199122730649759,0.9029533269515186,0.46875,32.0,0.53125,0.46875

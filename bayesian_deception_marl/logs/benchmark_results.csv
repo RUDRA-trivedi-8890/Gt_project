@@ -1,0 +1,5 @@
+Metric,Naive (lambda_0=0.0),Regularized (lambda_0=2.5)
+Goal Success Rate,0.0000,0.0000
+Interception Rate,1.0000,0.0000
+Mean Entropy at Midfield,0.0000,0.9998
+Mean Steps to Goal,6.0000,25.0000
