@@ -44,7 +44,7 @@ class DeceptionGridWorld(gym.Env):
         self.goal_a = np.array(config.goal_a, dtype=np.float32)
         self.goal_b = np.array(config.goal_b, dtype=np.float32)
 
-        self.action_space = spaces.Discrete(5)
+        self.action_space = spaces.Discrete(9)
         self.observation_space = spaces.Dict({
             "attacker": spaces.Box(
                 low=-1.0, high=1.0, shape=(3,), dtype=np.float32
@@ -54,13 +54,18 @@ class DeceptionGridWorld(gym.Env):
             ),
         })
 
-        # Action deltas: 0: Up, 1: Down, 2: Left, 3: Right, 4: Idle
+        # Action deltas: 9 discrete actions (4 cardinal + 4 diagonal + 1 idle)
+        # Allows smooth diagonal approaches instead of robotic 90-degree turns
         self._action_delta = np.array([
-            [-1, 0],   # Up
-            [1, 0],    # Down
-            [0, -1],   # Left
-            [0, 1],    # Right
-            [0, 0],    # Idle
+            [-1, 0],   # 0: Up (Backward)
+            [1, 0],    # 1: Down (Forward toward row 10)
+            [0, -1],   # 2: Left (toward Goal A col 0)
+            [0, 1],    # 3: Right (toward Goal B col 10)
+            [1, -1],   # 4: Forward-Left (Diagonal toward Goal A)
+            [1, 1],    # 5: Forward-Right (Diagonal toward Goal B)
+            [-1, -1],  # 6: Backward-Left
+            [-1, 1],   # 7: Backward-Right
+            [0, 0],    # 8: Idle
         ], dtype=np.float32)
 
         self.render_mode = render_mode
@@ -91,7 +96,10 @@ class DeceptionGridWorld(gym.Env):
     ) -> Tuple[Dict[str, np.ndarray], dict]:
         """Reset the environment, sample a new private type, return obs + info."""
         super().reset(seed=seed)
-        self.theta = int(self.np_random.integers(0, 2))
+        if options and "theta" in options:
+            self.theta = int(options["theta"])
+        else:
+            self.theta = int(self.np_random.integers(0, 2))
         self.attacker_pos = self.attacker_spawn.copy()
         self.defender_pos = self.defender_spawn.copy()
         self.timestep = 0
@@ -152,16 +160,18 @@ class DeceptionGridWorld(gym.Env):
         """
         self.timestep += 1
 
-        # Clamp actions to valid range
-        att_a = int(np.clip(attacker_action, 0, 4))
-        def_a = int(np.clip(defender_action, 0, 4))
+        # Clamp actions to valid range (9 discrete actions)
+        att_a = int(np.clip(attacker_action, 0, 8))
+        def_a = int(np.clip(defender_action, 0, 8))
 
         # Remember pre-step positions for progress shaping and commitment checks
         prev_att_pos = self.attacker_pos.copy()
         prev_def_col = int(self.defender_pos[1])
 
         # Move agents with fully vectorised bounds clamping
-        self.attacker_pos = self.attacker_pos + self._action_delta[att_a]
+        att_delta = self._action_delta[att_a].copy()
+
+        self.attacker_pos = self.attacker_pos + att_delta
         self.attacker_pos = np.clip(self.attacker_pos, 0, self.grid_size - 1)
 
         self.defender_pos = self.defender_pos + self._action_delta[def_a]
@@ -192,11 +202,12 @@ class DeceptionGridWorld(gym.Env):
         reward_defender = 0.0
         terminated = False
 
-        # Goal reached
-        if curr_dist_to_goal < self.cfg.goal_threshold:
+        # Active Goal Reached (Attacker within threshold of its target goal)
+        wrong_goal = self.goal_b if self.theta == 0 else self.goal_a
+        if curr_dist_to_goal <= 0.85:
             self.goal_reached = True
-            reward_attacker += self.cfg.goal_reward          # +30.0
-            reward_defender += -self.cfg.goal_reward         # -30.0
+            reward_attacker += self.cfg.goal_reward          # +35.0
+            reward_defender += -self.cfg.goal_reward         # -35.0
             terminated = True
 
             # False-alarm penalty: defender overcommitted to wrong side
@@ -204,6 +215,11 @@ class DeceptionGridWorld(gym.Env):
                 reward_defender -= self.cfg.false_alarm_penalty
             elif self.defender_committed_side == 1 and self.theta == 0:
                 reward_defender -= self.cfg.false_alarm_penalty
+
+        # Wrong goal deterrence (prevents mode collapse where agent always picks one goal)
+        elif np.linalg.norm(self.attacker_pos - wrong_goal) <= 1.0:
+            reward_attacker -= 15.0
+            terminated = True
 
         # Interception (Defender within threshold of Attacker)
         elif dist_att_def < self.cfg.intercept_threshold:
@@ -215,9 +231,22 @@ class DeceptionGridWorld(gym.Env):
         # Step penalty (Attacker only)
         reward_attacker -= self.c_step
 
-        # Potential-based progress shaping for the Attacker
+        # Potential-based progress shaping directly toward active goal
         progress = prev_dist_to_goal - curr_dist_to_goal
         reward_attacker += self.cfg.progress_shaping_coef * progress
+
+        # Game-Theoretic Pooling Constraint:
+        # Before Row 7, the Attacker is in the open surveillance zone. Any premature lateral deviation
+        # (col != 5) triggers severe exposure and is penalized (-10.0), enforcing pooling along Column 5.
+        # At Row 7 (the final tactical sector), the constraint lifts, compelling the Attacker
+        # to bifurcate diagonally toward its private target.
+        if self.attacker_pos[0] < 7.0 and int(self.attacker_pos[1]) != 5:
+            reward_attacker -= 10.0
+
+        # Harsh Defender Proximity Penalty: Teaches Attacker to actively dodge Defender at (9, 5)
+        # As Attacker approaches within 1.5 units of Defender, steep repulsive penalty is applied
+        if not self.intercepted and dist_att_def <= 1.5:
+            reward_attacker -= 4.0 * (1.5 - dist_att_def)
 
         # Defender distance shaping
         reward_defender += 0.01 * (1.0 / (1.0 + dist_att_def))
