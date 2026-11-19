@@ -1,0 +1,4 @@
+seed,final_interception_rate,final_goal_rate,final_route_entropy,final_pairwise_dist,final_t_reveal,phase,mu_e
+42,0.0,0.0,4.358248959570006,1.5487499999999996,25.0,1.0,0.0
+101,0.0625,0.0,4.358248959570006,1.9495000000000005,25.0,1.0,0.0
+2024,0.0,0.375,2.2389010979061945,0.0,25.0,1.0,0.0

@@ -1,0 +1,11 @@
+trick_name,interception_rate,false_alarm_rate,mean_steps_to_correct_belief
+StraightTo3,0.5,0.5,5.0
+StraightTo5,0.5,0.5,5.0
+StraightTo7,0.5,0.5,5.0
+StraightTo8,0.5,0.5,5.0
+StraightTo9,0.5,0.5,5.0
+FeintAndCut,0.5,0.5,5.0
+Zigzag,0.5,0.5,5.0
+MidPoolDash,0.5,0.5,5.0
+IdleRush,0.5,0.5,5.0
+NoiseJitter,0.5,0.5,5.0

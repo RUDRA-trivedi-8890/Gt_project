@@ -459,16 +459,30 @@ def train() -> None:
     att_path = os.path.join(save_dir, "attacker_net.pt")
     def_path = os.path.join(save_dir, "defender_net.pt")
     belief_path = os.path.join(save_dir, "belief_head.pt")
+    rec_def_path = os.path.join(save_dir, "recurrent_defender.pt")
 
     torch.save(attacker_net.state_dict(), att_path)
     torch.save(defender_net.state_dict(), def_path)
     torch.save(belief_head.state_dict(), belief_path)
 
-    print("\n[Train] Training complete!")
+    print("\n[Train] Baseline training complete!")
     print(f"[Train] Model weights saved successfully:")
     print(f"  - Attacker:    {att_path}")
     print(f"  - Defender:    {def_path}")
     print(f"  - Belief Head: {belief_path}")
+
+    # ------------------------------------------------------------------------
+    # 9. Train Upgraded Recurrent Defender with Sequential Belief Distillation
+    # ------------------------------------------------------------------------
+    print("\n" + "=" * 70)
+    print("[Train] Training Upgraded Recurrent Defender with Exact Bayes Distillation...")
+    print("=" * 70)
+    try:
+        from train_recurrent_defender import train_recurrent_defender
+        train_recurrent_defender(save_path=rec_def_path, num_episodes=600, device=str(device))
+        print(f"  - Recurrent Defender: {rec_def_path}")
+    except Exception as exc:
+        print(f"[Train] Warning: Could not train recurrent defender: {exc}")
 
 
 if __name__ == "__main__":

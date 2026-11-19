@@ -45,12 +45,13 @@ class DeceptionGridWorld(gym.Env):
         self.goal_b = np.array(config.goal_b, dtype=np.float32)
 
         self.action_space = spaces.Discrete(9)
+        def_obs_dim = 5 if getattr(config, "include_time_in_obs", False) else 4
         self.observation_space = spaces.Dict({
             "attacker": spaces.Box(
                 low=-1.0, high=1.0, shape=(3,), dtype=np.float32
             ),
             "defender": spaces.Box(
-                low=-1.0, high=1.0, shape=(4,), dtype=np.float32
+                low=-1.0, high=1.0, shape=(def_obs_dim,), dtype=np.float32
             ),
         })
 
@@ -127,12 +128,22 @@ class DeceptionGridWorld(gym.Env):
             float(self.theta),
         ], dtype=np.float32)
 
-        def_obs = np.array([
-            self.attacker_pos[0] / 10.0,
-            self.attacker_pos[1] / 10.0,
-            self.defender_pos[0] / 10.0,
-            self.defender_pos[1] / 10.0,
-        ], dtype=np.float32)
+        if getattr(self.cfg, "include_time_in_obs", False):
+            norm_t = float(self.timestep) / float(max(1, self.horizon))
+            def_obs = np.array([
+                self.attacker_pos[0] / 10.0,
+                self.attacker_pos[1] / 10.0,
+                self.defender_pos[0] / 10.0,
+                self.defender_pos[1] / 10.0,
+                norm_t,
+            ], dtype=np.float32)
+        else:
+            def_obs = np.array([
+                self.attacker_pos[0] / 10.0,
+                self.attacker_pos[1] / 10.0,
+                self.defender_pos[0] / 10.0,
+                self.defender_pos[1] / 10.0,
+            ], dtype=np.float32)
 
         return {"attacker": att_obs, "defender": def_obs}
 
@@ -164,8 +175,9 @@ class DeceptionGridWorld(gym.Env):
         att_a = int(np.clip(attacker_action, 0, 8))
         def_a = int(np.clip(defender_action, 0, 8))
 
-        # Remember pre-step positions for progress shaping and commitment checks
+        # Remember pre-step positions for progress shaping, commitment, and swap checks
         prev_att_pos = self.attacker_pos.copy()
+        prev_def_pos = self.defender_pos.copy()
         prev_def_col = int(self.defender_pos[1])
 
         # Move agents with fully vectorised bounds clamping
@@ -221,8 +233,33 @@ class DeceptionGridWorld(gym.Env):
             reward_attacker -= 15.0
             terminated = True
 
-        # Interception (Defender within threshold of Attacker)
-        elif dist_att_def < self.cfg.intercept_threshold:
+        # Interception Detection (including continuous swap / pass-through check)
+        is_intercept = False
+        if dist_att_def < self.cfg.intercept_threshold:
+            is_intercept = True
+        elif getattr(self.cfg, "detect_swaps", True):
+            # Check discrete cell swap: attacker moved to def's old tile and def moved to att's old tile
+            discrete_swap = (
+                np.array_equal(np.round(self.attacker_pos), np.round(prev_def_pos))
+                and np.array_equal(np.round(self.defender_pos), np.round(prev_att_pos))
+            )
+            if discrete_swap:
+                is_intercept = True
+            else:
+                # Continuous-time swept-sphere collision between moving agents
+                u = prev_att_pos - prev_def_pos
+                v = (self.attacker_pos - prev_att_pos) - (self.defender_pos - prev_def_pos)
+                v_sq = float(np.dot(v, v))
+                if v_sq > 1e-8:
+                    t_star = -float(np.dot(u, v)) / v_sq
+                    t_min = float(np.clip(t_star, 0.0, 1.0))
+                else:
+                    t_min = 0.0
+                min_step_dist = float(np.linalg.norm(u + t_min * v))
+                if min_step_dist < self.cfg.intercept_threshold:
+                    is_intercept = True
+
+        if is_intercept:
             self.intercepted = True
             reward_attacker += self.cfg.intercept_reward     # -15.0
             reward_defender += -self.cfg.intercept_reward    # +15.0

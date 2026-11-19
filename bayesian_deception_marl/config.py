@@ -36,6 +36,8 @@ class EnvConfig:
     goal_b: Tuple[int, int] = (10, 10)
     # Milestone requirements: (step, min_row). Penalize attacker if row not reached by step.
     milestones: Optional[List[Tuple[int, int]]] = None
+    detect_swaps: bool = True                 # Fix pass-through / cell-swap collision bug
+    include_time_in_obs: bool = False         # Include t / T_max in defender observation (dim 5 when True)
 
     def __post_init__(self) -> None:
         if self.milestones is None:
@@ -75,3 +77,47 @@ class DeceptionConfig:
     belief_lr: float = 1e-3
     label_smoothing: float = 0.1              # soften BCE targets to avoid overconfidence
     belief_temperature: float = 1.5           # soften softmax so early beliefs stay diffuse
+
+
+@dataclass
+class ArmsRaceConfig:
+    """Configuration for the adaptive arms-race mechanism (Phases 1 -> 2 -> 3).
+
+    All mechanisms are gated behind `enabled=False` by default to ensure
+    exact backward compatibility and reproducibility.
+    """
+
+    enabled: bool = False                     # Master flag for arms race mechanism
+    window_epochs: int = 5                    # Sliding window W of past epochs for caught-route archive
+    mu_max: float = 1.0                       # Maximum caught-route penalty weight
+    kappa: float = 5.0                        # Scaling for terminal reveal-delay reward
+    shaping_cap_ratio: float = 0.30           # Cap: total added shaping per episode <= 30% of goal_reward
+    p2_interception_threshold: float = 0.70   # Phase 2 trigger: interception rate threshold
+    p2_consecutive_epochs: int = 3            # Phase 2 trigger: required consecutive epochs above threshold
+    p3_ramp_epochs: int = 10                  # Phase 3: epochs R over which mu_e ramps linearly from 0 to mu_max
+    midfield_row: int = 5                     # Row <= 5 considered before midfield
+    belief_reveal_threshold: float = 0.90     # Defender belief threshold defining intent reveal
+    use_league: bool = False                  # League training toggle
+    league_checkpoint_freq: int = 5           # Keep past policy checkpoints every K epochs
+    league_sampling_prob: float = 0.30        # Opponent sampled as 70% current, 30% from past pool
+    use_history_input: bool = False           # Attacker input vector with last K episode outcomes
+    history_k: int = 5                        # Number of past episode outcomes tracked
+
+
+@dataclass
+class DefenderUpgradeConfig:
+    """Configuration for upgrading the Defender into a sequential Bayesian receiver."""
+
+    enabled: bool = True                      # Master toggle for recurrent receiver upgrade
+    use_recurrent_defender: bool = True       # GRU trunk over obs history with belief, policy, value heads
+    hidden_dim: int = 64                      # GRU hidden dimensionality
+    belief_stop_gradient: bool = False        # Detach belief features before feeding to policy head
+    belief_temperature: float = 1.0           # Removed 1.5 handicap: default 1.0 for calibrated probabilities
+    label_smoothing: float = 0.0              # Removed 0.1 handicap: default 0.0 for confident classification
+    use_exact_bayes_distill: bool = False     # Distillation auxiliary loss against exact Bayes teacher
+    distill_coef: float = 0.1                 # Weight for distillation loss
+    sync_tom_from_defender: bool = True       # Attacker ToM synced from frozen copy of defender belief head
+    tom_sync_freq: int = 5                    # Epoch sync frequency for frozen ToM
+    use_fictitious_play: bool = True          # Mix {current, past checkpoints, trick suite} in defender training
+    trick_sampling_prob: float = 0.30         # Fraction of episodes sampling from scripted trick attacker suite
+
